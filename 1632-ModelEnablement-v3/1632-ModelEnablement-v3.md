@@ -51,26 +51,7 @@ Currently enabled VLMs fall into two structural patterns:
 
 A separate vision encoder produces patch features, which are projected and injected into the text embedding stream. Two sub-adapters compose: a **vision tower adapter** and a **combined two-tower adapter**.
 
-```
-pixel_values
-    │
-    ▼
-Vision Tower (e.g. SigLIP, Pixtral)          compiled on Spyre
-    │  patch hidden states
-    │  output_hidden_states (for multi-layer injection)
-    ▼
-Projector(s)                                 CPU — stock modules
-    │  image_features [N_img_tokens, text_hidden]
-    ▼
-Text Embeddings ──► zero <image> slots       elementwise mul (Spyre-safe)
-    │
-    │  scatter image_features                CPU-built additive tensor
-    ▼
-Text Decoder (e.g. Granite, Mistral)         compiled on Spyre
-    ▼
-logits
-```
-![alt text](Architecture_Diagram_Two_Tower_model-1.png)
+![alt text](Architecture.png)
 
 **Verified examples:**
 - Granite Vision 4.1 4B (`hf_granite_vision_mm.py`) — SigLIP tower + Granite text decoder + deepstack/spatial multi-layer injection
@@ -98,7 +79,6 @@ Text Decoder (Gemma 4)                  compiled on Spyre
 logits
 ```
 
-![alt text](Architecture_Diagram_Encoder_Free_model-1.png)
 
 **Verified examples:**
 - Gemma 4 12B (`hf_gemma4_mm.py`) — encoder-free projection + Gemma 4 text decoder (bf16, bidirectional vision attention)
