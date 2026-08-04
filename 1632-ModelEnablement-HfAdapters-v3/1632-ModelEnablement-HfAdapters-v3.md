@@ -1,4 +1,4 @@
-# RFC 1632-ModelEnablement-v3: Vision Model Enablement in hf-adapters
+# RFC 1632-ModelEnablement-HfAdapters-v3: Vision Model Enablement in hf-adapters
 
 **Authors:**
 
@@ -6,6 +6,7 @@
 - Ariel Gera
 - Benjamin Sznajder
 - Assaf Toledo
+- Antoni Viros i Martin
 - Saurabh Srivastava
 - Ajit Samuel John
 
@@ -22,7 +23,7 @@ This RFC defines the approach for enabling Vision-Language Models (VLMs) on Spyr
 - A CI/CD regression strategy for VLM adapters across CPU, and Spyre tiers
 - The labeling system inherited from RFC #1632 v2, extended with vision-specific labels
 
-This RFC builds directly on RFC #1632 v2 (Ariel Gera, Benjamin Sznajder, Assaf Toledo), which established the label-based model tracking framework and the `hf-adapters` architecture for text models. Vision models add a second tower (or a projection module), require additional Spyre adaptations, and introduce a new class of test (`test_vlm_e2e_cpu.py`, `test_vlm_e2e_spyre.py`) that verifies the full image→text pipeline end-to-end.
+This RFC builds directly on RFC #1632 v2, which established the label-based model tracking framework and the `hf-adapters` architecture for text models. Vision models add a second tower (or a projection module), require additional Spyre adaptations, and introduce a new class of test (`test_vlm_e2e_cpu.py`, `test_vlm_e2e_spyre.py`) that verifies the full image→text pipeline end-to-end.
 
 ---
 
@@ -474,13 +475,8 @@ Run VLMs through the vLLM Spyre plugin rather than through `hf-adapters`. vLLM h
 
 **Tradeoff:** vLLM's multimodal runner adds significant complexity (prefill splitter, image feature cache, chunked prefill). Its compiled graphs are harder to debug and the dependency footprint is heavier. The `hf-adapters` approach trades this complexity for a simpler, more transparent adapter that directly patches the HF model. For the scale of models currently targeted (4B–24B VLMs, single-device), `hf-adapters` has lower operational overhead.
 
-### Alternative 2: Single compiled graph for the full VLM
 
-Compile the vision tower and text decoder into a single `torch.compile` graph rather than composing them at the Python level.
-
-**Tradeoff:** This would eliminate the Python-level feature injection loop and reduce the number of graph boundaries. However, the heterogeneous compute requirement (Conv2d on CPU, projectors on CPU) creates graph breaks that prevent a single graph from covering the full forward. The current architecture explicitly manages these breaks as Python code, which is debuggable and measurable.
-
-### Alternative 3: Online image pre-processing on Spyre
+### Alternative 2: Online image pre-processing on Spyre
 
 Run the processor's image tiling and patch extraction on Spyre rather than on CPU.
 
@@ -488,14 +484,13 @@ Run the processor's image tiling and patch extraction on Spyre rather than on CP
 
 ---
 
-## Prior Art
+## References
 
-- **RFC #1632 v1** (Romit Jain, Ashok Pon Kumar Sree Prakash): established the motivation for Spyre model enablement tracking, recommended vLLM-based tracing, and proposed ops/modules percentage metrics.
-- **RFC #1632 v2** (Ariel Gera, Benjamin Sznajder, Assaf Toledo): defined the label-based tracking framework, the `hf-adapters` monkey-patch approach, model registry (`models.csv`), reference output storage, and the three-tier CI/CD structure. This RFC is a direct extension of that framework to vision models.
+- **RFC #1632 v1** : established the motivation for Spyre model enablement tracking, recommended vLLM-based tracing, and proposed ops/modules percentage metrics.
+- **RFC #1632 v2** : defined the label-based tracking framework, the `hf-adapters` monkey-patch approach, model registry (`models.csv`), reference output storage, and the three-tier CI/CD structure. This RFC is a direct extension of that framework to vision models.
 - **`hf-adapters` repository**: the implementation this RFC formalizes for VLMs. See [`ARCHITECTURE.md`](../hf-adapters/ARCHITECTURE.md) (Multimodal VLM Path section), [`hf_siglip_vision.py`](../hf-adapters/hf_adapters/hf_siglip_vision.py), [`hf_pixtral_vision.py`](../hf-adapters/hf_adapters/hf_pixtral_vision.py), [`hf_granite_vision_mm.py`](../hf-adapters/hf_adapters/hf_granite_vision_mm.py), [`hf_mistral3_vision_mm.py`](../hf-adapters/hf_adapters/hf_mistral3_vision_mm.py), [`hf_gemma4_mm.py`](../hf-adapters/hf_adapters/hf_gemma4_mm.py).
 - **SigLIP (Zhai et al., 2023)**: the vision transformer backbone used by Granite Vision 4.1 and the Gemma 3 family. Pre-LN ViT trained with a sigmoid-based pairwise loss.
 - **Pixtral (Mistral AI, 2024)**: the vision tower in Mistral3 VLMs. Variable-resolution ViT with 2D RoPE and SwiGLU MLP.
-- **LLaVA / InstructBLIP**: early VLM architectures that established the pattern of projecting patch features into the LM token embedding stream. Granite Vision's deepstack injection extends this by distributing features across multiple decoder layers.
 
 ---
 
@@ -511,12 +506,9 @@ Run the processor's image tiling and patch extraction on Spyre rather than on CP
 
 ## Unresolved Questions
 
-- **Variable image resolution and recompilation.** Pixtral's variable `P` triggers recompilation per unique patch count. Should the adapter cache compiled graphs per `P` value (Spyre compilation is expensive, ~30–90 seconds per graph)? A `_compiled_blocks_cache` dict keyed on `P` may be needed for production use.
-- **Batch image heterogeneity.** Current adapters assume all images in a batch have been tiled and concatenated by the processor into compatible tensor shapes. What happens when a batch contains images of different original resolutions that tile into different patch counts? The Pixtral block-diagonal mask handles per-image attention isolation, but the adapter's sequence dimension must be padded to accommodate all images.
-- **Vision tower + text decoder memory budget.** For the 24B Mistral-Small model, the SigLIP or Pixtral tower adds several hundred MB. What is the maximum total VLM parameter count that can be loaded into Spyre's HBM? This depends on the specific Spyre generation and should be documented per hardware target.
-- **Streaming and speculative decoding.** These features are not yet implemented for any adapter (text or vision). Are there VLM-specific constraints that would further complicate streaming or speculative decode (e.g., the vision prefill step always runs on step 0)?
-- **Gemma 3 multimodal.** Gemma 3 4B/12B/27B ship as multimodal checkpoints (`model_type=gemma3`) but their vision tower has not been enabled. The text backbone is verified; a Gemma 3 vision adapter would require a SigLIP tower adapter pointing to the Gemma 3 checkpoint structure and a combined adapter analogous to `hf_granite_vision_mm.py`. Is this a priority?
 - **Quality evaluation for VLMs.** The current accuracy tests verify that the adapter's logits match stock HF logits. They do not assess visual understanding quality (e.g., VQA accuracy on MME or MMMU). Should a periodic quality eval for VLMs be added to the testing framework?
+
+- **CPU–Spyre transfer overhead for large images.** Conv2d patch embeddings and projector outputs are transferred from CPU to Spyre on every request. For large images with many patches (Pixtral at high resolution), the transfer volume grows proportionally. At what image size does the CPU→Spyre transfer become the dominant latency in the vision prefill, and should patch embeddings be cached across requests for identical image inputs?
 
 ---
 
