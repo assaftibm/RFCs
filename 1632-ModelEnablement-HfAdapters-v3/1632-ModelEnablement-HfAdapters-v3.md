@@ -259,21 +259,7 @@ A vision model may hold any combination of these labels. The minimal path to pro
 
 ### 5. Testing Methodology
 
-#### 5.1 Vision Tower Accuracy Test
-
-Tests the bare vision tower in isolation, comparing the Spyre-prepared adapter against the stock HF tower extracted from the multimodal checkpoint.
-
-```python
-# hf_siglip_vision.load_hf_model or hf_pixtral_vision.load_hf_model
-# extracts the bare tower from the VLM checkpoint via safetensor key remapping.
-# prepare_for_spyre() patches the tower.
-# pixel_values: seeded torch.randn at the tower's native resolution.
-# Compare: last_hidden_state cosine similarity ≥ 0.999 (fp16)
-```
-
-Synthetic `pixel_values` (seeded `torch.randn` at the tower's native resolution) are used instead of real images. This makes the test fast, deterministic, and pure (no processor tiling dependency).
-
-#### 5.2 End-to-End VLM Accuracy Test (CPU)
+#### 5.1 End-to-End VLM Accuracy Test (CPU)
 
 Tests the full image→text pipeline: processor → adapter `generate` → decoded text. Compared against stock `AutoModelForImageTextToText.generate` (token-for-token).
 
@@ -288,7 +274,7 @@ A real, recognizable hub image (a chonky cat from `huggingface/documentation-ima
 
 Extra multimodal inputs beyond the standard three (`input_ids`, `attention_mask`, `pixel_values`) are forwarded by keyword via `extra_image_inputs(fn, batch)`, which inspects the adapter's `generate` signature — keeping the test harness signature-agnostic across VLM families (e.g., `image_sizes` for Granite Vision / Mistral3, `image_position_ids` + `mm_token_type_ids` for Gemma 4).
 
-#### 5.3 End-to-End VLM Accuracy Test (Spyre)
+#### 5.2 End-to-End VLM Accuracy Test (Spyre)
 
 Tests the full pipeline on Spyre hardware using a **teacher-forced** approach. Stock generates tokens on CPU; the Spyre adapter is driven step-by-step using those same tokens, and per-step logit cosine similarity is asserted.
 
